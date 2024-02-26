@@ -1,6 +1,6 @@
 package com.tradingsystem.counterpartysimulator
 
-import com.fasterxml.jackson.databind.ObjectMapper
+import com.tradingsystem.counterpartysimulator.polygon.PolygonService
 import jakarta.annotation.PostConstruct
 import jakarta.annotation.PreDestroy
 import org.slf4j.LoggerFactory
@@ -8,15 +8,12 @@ import org.springframework.stereotype.Service
 import quickfix.*
 import quickfix.field.*
 import java.io.ByteArrayInputStream
-import java.net.URI
 import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.nio.charset.Charset
 import java.util.*
 
 @Service
-class CounterpartySimulator(private val objectMapper: ObjectMapper) : ApplicationAdapter() {
+class CounterpartySimulator(private val polygonService: PolygonService) : ApplicationAdapter() {
 
     private lateinit var acceptor: SocketAcceptor
     private val log = LoggerFactory.getLogger(CounterpartySimulator::class.java)
@@ -83,7 +80,8 @@ class CounterpartySimulator(private val objectMapper: ObjectMapper) : Applicatio
         executionReport.setField(Symbol(symbol))
         executionReport.setField(Side(side))
         executionReport.setField(LastShares(orderQty))
-        val price = getQuote(symbol)
+        val previousClose = polygonService.previousClose(symbol)
+        val price = previousClose.results?.get(0)?.c ?: 0.0
         executionReport.setField(AvgPx(price))
         executionReport.setField(LeavesQty(0.0))
         executionReport.setField(CumQty(orderQty))
@@ -94,24 +92,6 @@ class CounterpartySimulator(private val objectMapper: ObjectMapper) : Applicatio
     }
 
     private val httpClient = HttpClient.newHttpClient()
-
-    private val alphaVantageApiKey = System.getenv("ALPHA_VANTAGE_API_KEY")
-
-    private fun getQuote(symbol: String): Double {
-        val url = "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=$symbol&apikey=$alphaVantageApiKey"
-        val start = System.currentTimeMillis()
-        log.info("Calling GET $url")
-        val httpResponse = httpClient.send(
-            HttpRequest.newBuilder().GET().uri(URI.create(url)).build(),
-            HttpResponse.BodyHandlers.ofString()
-        )
-        val responseBody = httpResponse.body()
-        val stop = System.currentTimeMillis()
-        log.info("Finished calling GET $url status=${httpResponse.statusCode()} body=$responseBody took ${stop - start}ms")
-        val json = objectMapper.readTree(responseBody)
-        val price = json.at("/Global Quote/05. price").asDouble()
-        return price
-    }
 
 
     private fun loadSessionSettingsFromEnvironment(): SessionSettings {
